@@ -543,6 +543,7 @@ void createSyncObjects() {
 }
 
 void drawFrame() {
+  vkQueueWaitIdle(queue);
   vkWaitForFences(device, 1, &inFlight, VK_TRUE, UINT64_MAX);
   vkResetFences(device, 1, &inFlight);
 
@@ -629,16 +630,18 @@ void destroyFramebuffers() {
 void cleanUp() {
   glfwDestroyWindow(window);
   glfwTerminate();
-  vkDestroySurfaceKHR(vkInstance, surface, NULL);
   vkDestroySwapchainKHR(device, swapchain, NULL);
+  vkDestroySurfaceKHR(vkInstance, surface, NULL);
   destroyImageViews();
   destroyFramebuffers();
   vkDestroyPipelineLayout(device, pipelineLayout, NULL);
-  vkDestroyDevice(device, NULL);
+  vkDestroyPipeline(device, pipeline, NULL);
+  vkDestroyRenderPass(device, renderPass, NULL);
   vkDestroyCommandPool(device, commandPool, NULL);
   vkDestroySemaphore(device, imageAvailableSemaphore, NULL);
   vkDestroySemaphore(device, renderFinishedSemaphore, NULL);
   vkDestroyFence(device, inFlight, NULL);
+  vkDestroyDevice(device, NULL);
   vkDestroyInstance(vkInstance, NULL);
   free(swapchainImages);
   free(swapchainImageViews);
