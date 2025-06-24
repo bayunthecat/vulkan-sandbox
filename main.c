@@ -150,7 +150,7 @@ void createSwapchain() {
       .sType = VK_STRUCTURE_TYPE_SWAPCHAIN_CREATE_INFO_KHR,
       .imageFormat = imageFormat,
       .imageColorSpace = VK_COLOR_SPACE_SRGB_NONLINEAR_KHR,
-      .presentMode = VK_PRESENT_MODE_FIFO_KHR,
+      .presentMode = VK_PRESENT_MODE_MAILBOX_KHR,
       .imageExtent = extent,
       .surface = surface,
       .minImageCount = swapchainImageCount,
@@ -166,18 +166,18 @@ void createSwapchain() {
   };
   VkResult result = vkCreateSwapchainKHR(device, &info, NULL, &swapchain);
   if (result != VK_SUCCESS) {
-    printf("failed to create swapchain");
+    printf("failed to create swapchain\n");
     exit(1);
   }
   vkGetSwapchainImagesKHR(device, swapchain, &imageCount, NULL);
   if (imageCount == 0) {
-    printf("no images in the swapchain");
+    printf("no images in the swapchain\n");
     exit(1);
   }
   printf("swapchain images: %d\n", imageCount);
   swapchainImages = malloc(sizeof(VkImage) * imageCount);
   if (swapchainImages == NULL) {
-    printf("malloc failed");
+    printf("malloc failed\n");
     exit(1);
   }
   vkGetSwapchainImagesKHR(device, swapchain, &imageCount, swapchainImages);
@@ -581,6 +581,7 @@ void drawFrame() {
   vkAcquireNextImageKHR(device, swapchain, UINT64_MAX,
                         imageAvailableSemaphores[currentFrame], VK_NULL_HANDLE,
                         &imageIndex);
+  printf("Frame %d: acquired image %u\n", currentFrame, imageIndex);
   vkResetCommandBuffer(commandBuffers[currentFrame], 0);
   recordCommandBuffer(commandBuffers[currentFrame], imageIndex);
 
@@ -609,7 +610,12 @@ void drawFrame() {
       .pSwapchains = &swapchain,
       .pImageIndices = &imageIndex,
   };
-  vkQueuePresentKHR(queue, &presentInfo);
+  printf("Presenting image %u\n", imageIndex);
+  VkResult result = vkQueuePresentKHR(queue, &presentInfo);
+  if (result != VK_SUCCESS) {
+    printf("present failed\n");
+    exit(1);
+  }
   currentFrame = (currentFrame + 1) % MAX_FRAMES_IN_FLIGHT;
 }
 
