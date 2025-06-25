@@ -6,7 +6,16 @@
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 #include <vulkan/vulkan.h>
+
+VkDeviceMemory shapeMemory;
+
+VkDeviceMemory colorMemory;
+
+VkBuffer vertexShapeBuffer;
+
+VkBuffer colorBuffer;
 
 GLFWwindow *window;
 
@@ -53,6 +62,56 @@ VkFence *inFlight;
 const int MAX_FRAMES_IN_FLIGHT = 2;
 
 uint32_t currentFrame = 0;
+
+const float shape[3][2] = {
+    {0.0f, -0.5f},
+    {0.5f, 0.5f},
+    {-0.5f, 0.5f},
+};
+
+const float colors[3][3] = {
+    {1.0f, 0.0f, 0.0f},
+    {0.0f, 1.0f, 0.0f},
+    {0.0f, 0.0f, 1.0f},
+};
+
+VkVertexInputBindingDescription getShapeBindingDescription() {
+  VkVertexInputBindingDescription bindDesc = {
+      .binding = 0,
+      .stride = sizeof(float) * 2,
+      .inputRate = VK_VERTEX_INPUT_RATE_VERTEX,
+  };
+  return bindDesc;
+}
+
+VkVertexInputBindingDescription getColorBindingDescription() {
+  VkVertexInputBindingDescription bindDesc = {
+      .binding = 1,
+      .stride = sizeof(float) * 3,
+      .inputRate = VK_VERTEX_INPUT_RATE_VERTEX,
+  };
+  return bindDesc;
+}
+
+VkVertexInputAttributeDescription getShapeAttributeDescription() {
+  VkVertexInputAttributeDescription attrDesc = {
+      .location = 0,
+      .binding = 0,
+      .format = VK_FORMAT_R32G32_SFLOAT,
+      .offset = 0,
+  };
+  return attrDesc;
+}
+
+VkVertexInputAttributeDescription getColorAttributeDescription() {
+  VkVertexInputAttributeDescription attrDesc = {
+      .location = 1,
+      .binding = 1,
+      .format = VK_FORMAT_R32G32B32_SFLOAT,
+      .offset = 0,
+  };
+  return attrDesc;
+}
 
 void createInstance() {
   printf("creating vulkan instance\n");
@@ -281,12 +340,20 @@ void createGraphicsPipeline() {
       .dynamicStateCount = 2,
       .pDynamicStates = dynamicStates,
   };
+  VkVertexInputAttributeDescription attrDesc[2] = {
+      getShapeAttributeDescription(),
+      getColorAttributeDescription(),
+  };
+  VkVertexInputBindingDescription bindDesc[2] = {
+      getShapeBindingDescription(),
+      getColorBindingDescription(),
+  };
   VkPipelineVertexInputStateCreateInfo vertexInputInfo = {
       .sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO,
-      .vertexAttributeDescriptionCount = 0,
-      .pVertexAttributeDescriptions = NULL,
-      .vertexBindingDescriptionCount = 0,
-      .pVertexBindingDescriptions = NULL,
+      .vertexAttributeDescriptionCount = 2,
+      .pVertexAttributeDescriptions = attrDesc,
+      .vertexBindingDescriptionCount = 2,
+      .pVertexBindingDescriptions = bindDesc,
   };
   VkPipelineInputAssemblyStateCreateInfo inputAssemblyInfo = {
       .sType = VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO,
@@ -574,6 +641,8 @@ void createSyncObjects() {
 }
 
 void drawFrame() {
+  // TODO looks like shit
+  // vkQueueWaitIdle(queue);
   vkWaitForFences(device, 1, &inFlight[currentFrame], VK_TRUE, UINT64_MAX);
   vkResetFences(device, 1, &inFlight[currentFrame]);
 
@@ -581,7 +650,6 @@ void drawFrame() {
   vkAcquireNextImageKHR(device, swapchain, UINT64_MAX,
                         imageAvailableSemaphores[currentFrame], VK_NULL_HANDLE,
                         &imageIndex);
-  printf("Frame %d: acquired image %u\n", currentFrame, imageIndex);
   vkResetCommandBuffer(commandBuffers[currentFrame], 0);
   recordCommandBuffer(commandBuffers[currentFrame], imageIndex);
 
@@ -610,7 +678,6 @@ void drawFrame() {
       .pSwapchains = &swapchain,
       .pImageIndices = &imageIndex,
   };
-  printf("Presenting image %u\n", imageIndex);
   VkResult result = vkQueuePresentKHR(queue, &presentInfo);
   if (result != VK_SUCCESS) {
     printf("present failed\n");
@@ -627,6 +694,66 @@ void initWindow() {
   glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
   glfwWindowHint(GLFW_RESIZABLE, GLFW_FALSE);
   window = glfwCreateWindow(800, 600, "Learn Vulkan", NULL, NULL);
+}
+
+uint32_t findMemoryType(uint32_t typeFilter, VkMemoryPropertyFlags props) {
+  VkPhysicalDeviceMemoryProperties memProps;
+  vkGetPhysicalDeviceMemoryProperties(physicalDevice, &memProps);
+  for (uint32_t i = 0; i < memProps.memoryTypeCount; i++) {
+    if ((typeFilter & (1 << i)) &&
+        (memProps.memoryTypes[i].propertyFlags & props) == props) {
+      return i;
+    }
+  }
+  return 0;
+}
+
+void allocateBufferMem(VkBuffer buffer, VkDeviceMemory *memory) {
+  VkMemoryRequirements memReq;
+  vkGetBufferMemoryRequirements(device, buffer, &memReq);
+  VkMemoryAllocateInfo info = {
+      .sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO,
+      .allocationSize = memReq.size,
+      .memoryTypeIndex = findMemoryType(
+          memReq.memoryTypeBits, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT |
+                                     VK_MEMORY_PROPERTY_HOST_COHERENT_BIT),
+  };
+  if (vkAllocateMemory(device, &info, NULL, memory) != VK_SUCCESS) {
+    printf("error allocation GPU mem\n");
+    exit(1);
+  }
+}
+
+void createVertexBuffer() {
+  VkBufferCreateInfo vertexInfo = {
+      .sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
+      .size = sizeof(float) * 3 * 2,
+      .usage = VK_BUFFER_USAGE_VERTEX_BUFFER_BIT,
+      .sharingMode = VK_SHARING_MODE_EXCLUSIVE,
+  };
+  if (vkCreateBuffer(device, &vertexInfo, NULL, &vertexShapeBuffer) !=
+      VK_SUCCESS) {
+    printf("unable to create vertex shape buffer\n");
+    exit(1);
+  }
+  allocateBufferMem(vertexShapeBuffer, &shapeMemory);
+  VkBufferCreateInfo colorInfo = {
+      .sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
+      .size = sizeof(float) * 3 * 3,
+      .usage = VK_BUFFER_USAGE_VERTEX_BUFFER_BIT,
+      .sharingMode = VK_SHARING_MODE_EXCLUSIVE,
+  };
+  if (vkCreateBuffer(device, &colorInfo, NULL, &vertexShapeBuffer) !=
+      VK_SUCCESS) {
+    printf("unable to create vertex color buffer\n");
+    exit(1);
+  }
+  allocateBufferMem(colorBuffer, &colorMemory);
+}
+
+void destroyBuffers() {
+  vkDestroyBuffer(device, vertexShapeBuffer, NULL);
+  vkDestroyBuffer(device, colorBuffer, NULL);
 }
 
 void initVulkan() {
@@ -666,6 +793,12 @@ void destroyFramebuffers() {
   }
 }
 
+void cleanupSwapchain() {
+  destroyFramebuffers();
+  destroyImageViews();
+  vkDestroySwapchainKHR(device, swapchain, NULL);
+}
+
 void destroySyncObjects() {
   for (uint32_t i = 0; i < MAX_FRAMES_IN_FLIGHT; i++) {
     vkDestroySemaphore(device, imageAvailableSemaphores[i], NULL);
@@ -680,7 +813,7 @@ void destroySyncObjects() {
 void cleanUp() {
   glfwDestroyWindow(window);
   glfwTerminate();
-  vkDestroySwapchainKHR(device, swapchain, NULL);
+  cleanupSwapchain();
   vkDestroySurfaceKHR(vkInstance, surface, NULL);
   destroyImageViews();
   destroyFramebuffers();
@@ -689,6 +822,7 @@ void cleanUp() {
   vkDestroyRenderPass(device, renderPass, NULL);
   vkDestroyCommandPool(device, commandPool, NULL);
   destroySyncObjects();
+  destroyBuffers();
   vkDestroyDevice(device, NULL);
   vkDestroyInstance(vkInstance, NULL);
   free(swapchainImages);
