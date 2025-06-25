@@ -581,7 +581,6 @@ void drawFrame() {
   vkAcquireNextImageKHR(device, swapchain, UINT64_MAX,
                         imageAvailableSemaphores[currentFrame], VK_NULL_HANDLE,
                         &imageIndex);
-  printf("Frame %d: acquired image %u\n", currentFrame, imageIndex);
   vkResetCommandBuffer(commandBuffers[currentFrame], 0);
   recordCommandBuffer(commandBuffers[currentFrame], imageIndex);
 
@@ -610,7 +609,6 @@ void drawFrame() {
       .pSwapchains = &swapchain,
       .pImageIndices = &imageIndex,
   };
-  printf("Presenting image %u\n", imageIndex);
   VkResult result = vkQueuePresentKHR(queue, &presentInfo);
   if (result != VK_SUCCESS) {
     printf("present failed\n");
