@@ -6,6 +6,7 @@
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 #include <vulkan/vulkan.h>
 
 GLFWwindow *window;
@@ -50,9 +51,83 @@ VkSemaphore *renderFinishedSemaphores;
 
 VkFence *inFlight;
 
+VkBuffer buffer;
+
+VkDeviceMemory memory;
+
 const int MAX_FRAMES_IN_FLIGHT = 2;
 
 uint32_t currentFrame = 0;
+
+float vertices[][2] = {
+    {0.0f, -0.5f},
+    {0.5f, 0.5f},
+    {-0.5f, 0.5f},
+};
+
+VkVertexInputBindingDescription getBindDesc() {
+  VkVertexInputBindingDescription desc = {
+      .binding = 0,
+      .inputRate = VK_VERTEX_INPUT_RATE_VERTEX,
+      .stride = sizeof(float) * 2,
+  };
+  return desc;
+}
+
+VkVertexInputAttributeDescription getAttrDesc() {
+  VkVertexInputAttributeDescription desc = {
+      .binding = 0,
+      .location = 0,
+      .format = VK_FORMAT_R32G32_SFLOAT,
+      .offset = 0,
+  };
+  return desc;
+}
+
+uint32_t findMemoryType(uint32_t typeFilter, VkMemoryPropertyFlags props) {
+  VkPhysicalDeviceMemoryProperties memProps = {};
+  vkGetPhysicalDeviceMemoryProperties(physicalDevice, &memProps);
+  for (uint32_t i = 0; i < memProps.memoryTypeCount; i++) {
+    if (typeFilter & (1 << i) &&
+        (memProps.memoryTypes[i].propertyFlags & props) == props) {
+      return i;
+    }
+  }
+  printf("unable to find suitable memory\n");
+  exit(1);
+}
+
+void createVertexBuffer() {
+  VkBufferCreateInfo info = {
+      .sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
+      .size = sizeof(float) * 2 * 3,
+      .usage = VK_BUFFER_USAGE_VERTEX_BUFFER_BIT,
+      .sharingMode = VK_SHARING_MODE_EXCLUSIVE,
+  };
+  if (vkCreateBuffer(device, &info, NULL, &buffer) != VK_SUCCESS) {
+    printf("buffer creation failed\n");
+    exit(1);
+  }
+  VkMemoryRequirements memReq = {};
+  vkGetBufferMemoryRequirements(device, buffer, &memReq);
+  uint32_t memTypeIndex = findMemoryType(
+      memReq.memoryTypeBits, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT |
+                                 VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
+  VkMemoryAllocateInfo allocInfo = {
+      .sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO,
+      .memoryTypeIndex = memTypeIndex,
+      .allocationSize = memReq.size,
+  };
+  if (vkAllocateMemory(device, &allocInfo, NULL, &memory) != VK_SUCCESS) {
+    printf("error allocating memory\n");
+    exit(1);
+  }
+  vkBindBufferMemory(device, buffer, memory, 0);
+  void *data;
+  vkMapMemory(device, memory, 0, info.size, 0, &data);
+  memcpy(data, vertices, (size_t)info.size);
+  vkUnmapMemory(device, memory);
+}
 
 void createInstance() {
   printf("creating vulkan instance\n");
@@ -281,12 +356,14 @@ void createGraphicsPipeline() {
       .dynamicStateCount = 2,
       .pDynamicStates = dynamicStates,
   };
+  VkVertexInputAttributeDescription attr[] = {getAttrDesc()};
+  VkVertexInputBindingDescription binds[] = {getBindDesc()};
   VkPipelineVertexInputStateCreateInfo vertexInputInfo = {
       .sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO,
-      .vertexAttributeDescriptionCount = 0,
-      .pVertexAttributeDescriptions = NULL,
-      .vertexBindingDescriptionCount = 0,
-      .pVertexBindingDescriptions = NULL,
+      .vertexAttributeDescriptionCount = 1,
+      .pVertexAttributeDescriptions = attr,
+      .vertexBindingDescriptionCount = 1,
+      .pVertexBindingDescriptions = binds,
   };
   VkPipelineInputAssemblyStateCreateInfo inputAssemblyInfo = {
       .sType = VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO,
@@ -521,6 +598,8 @@ void recordCommandBuffer(VkCommandBuffer commandBuffer, uint32_t imageIndex) {
       .extent = swapchainExtent,
   };
   vkCmdSetScissor(commandBuffer, 0, 1, &scissor);
+  VkDeviceSize offsets[] = {0};
+  vkCmdBindVertexBuffers(commandBuffer, 0, 1, &buffer, offsets);
   vkCmdDraw(commandBuffer, 3, 1, 0, 0);
 
   vkCmdEndRenderPass(commandBuffer);
@@ -576,12 +655,10 @@ void createSyncObjects() {
 void drawFrame() {
   vkWaitForFences(device, 1, &inFlight[currentFrame], VK_TRUE, UINT64_MAX);
   vkResetFences(device, 1, &inFlight[currentFrame]);
-
   uint32_t imageIndex;
   vkAcquireNextImageKHR(device, swapchain, UINT64_MAX,
                         imageAvailableSemaphores[currentFrame], VK_NULL_HANDLE,
                         &imageIndex);
-  printf("Frame %d: acquired image %u\n", currentFrame, imageIndex);
   vkResetCommandBuffer(commandBuffers[currentFrame], 0);
   recordCommandBuffer(commandBuffers[currentFrame], imageIndex);
 
@@ -610,7 +687,6 @@ void drawFrame() {
       .pSwapchains = &swapchain,
       .pImageIndices = &imageIndex,
   };
-  printf("Presenting image %u\n", imageIndex);
   VkResult result = vkQueuePresentKHR(queue, &presentInfo);
   if (result != VK_SUCCESS) {
     printf("present failed\n");
@@ -644,6 +720,7 @@ void initVulkan() {
   createCommandPool();
   createCommandBuffers();
   createSyncObjects();
+  createVertexBuffer();
 }
 
 void mainLoop() {
@@ -688,6 +765,8 @@ void cleanUp() {
   vkDestroyPipeline(device, pipeline, NULL);
   vkDestroyRenderPass(device, renderPass, NULL);
   vkDestroyCommandPool(device, commandPool, NULL);
+  vkDestroyBuffer(device, buffer, NULL);
+  vkFreeMemory(device, memory, NULL);
   destroySyncObjects();
   vkDestroyDevice(device, NULL);
   vkDestroyInstance(vkInstance, NULL);
