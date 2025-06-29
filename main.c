@@ -60,9 +60,8 @@ const int MAX_FRAMES_IN_FLIGHT = 2;
 uint32_t currentFrame = 0;
 
 float vertices[][2] = {
-    {0.0f, -0.5f},
-    {0.5f, 0.5f},
-    {-0.5f, 0.5f},
+    {-0.5f, -0.5f}, {0.5f, -0.5f}, {0.5f, 0.5f},
+    {-0.5f, -0.5f}, {0.5f, 0.5f},  {-0.5f, 0.5f},
 };
 
 VkVertexInputBindingDescription getBindDesc() {
@@ -159,8 +158,8 @@ void copyBuffer(VkBuffer srcBuffer, VkBuffer dstBuffer, VkDeviceSize size) {
 void createVertexBuffer() {
   VkBuffer stagingBuffer;
   VkDeviceMemory stagingMemory;
-  VkDeviceSize bufferSize = sizeof(float) * 2 * 3;
-  createBuffer(bufferSize, VK_BUFFER_USAGE_TRANSFER_DST_BIT,
+  VkDeviceSize bufferSize = sizeof(float) * 2 * 6;
+  createBuffer(bufferSize, VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
                VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT |
                    VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
                &stagingBuffer, &stagingMemory);
@@ -649,8 +648,7 @@ void recordCommandBuffer(VkCommandBuffer commandBuffer, uint32_t imageIndex) {
   vkCmdSetScissor(commandBuffer, 0, 1, &scissor);
   VkDeviceSize offsets[] = {0};
   vkCmdBindVertexBuffers(commandBuffer, 0, 1, &buffer, offsets);
-  vkCmdDraw(commandBuffer, 3, 1, 0, 0);
-
+  vkCmdDraw(commandBuffer, 6, 1, 0, 0);
   vkCmdEndRenderPass(commandBuffer);
   VkResult endBufferResult = vkEndCommandBuffer(commandBuffer);
   if (endBufferResult != VK_SUCCESS) {
