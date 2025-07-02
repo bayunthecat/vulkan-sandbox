@@ -1,6 +1,8 @@
+#include "cglm/vec3.h"
 #include "vulkan/vk_platform.h"
 #include "vulkan/vulkan_core.h"
 #include <GLFW/glfw3.h>
+#include <cglm/cglm.h>
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
@@ -55,6 +57,8 @@ VkBuffer buffer;
 
 VkDeviceMemory memory;
 
+mat4 m;
+
 const int MAX_FRAMES_IN_FLIGHT = 2;
 
 uint32_t currentFrame = 0;
@@ -65,6 +69,10 @@ float vertices[][2] = {
 };
 
 VkVertexInputBindingDescription getBindDesc() {
+  float f1 = 1.0;
+  float f2 = 2.0;
+  float d = glm_dot(&f1, &f2);
+  printf("dot %f\n", d);
   VkVertexInputBindingDescription desc = {
       .binding = 0,
       .inputRate = VK_VERTEX_INPUT_RATE_VERTEX,

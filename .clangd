@@ -1,2 +1,2 @@
 CompileFlags:
-  Add: [-IC:/VulkanSDK/1.4.313.0/Include, -IE:/soft/glfw-3.4/include/]
+  Add: [-IC:/VulkanSDK/1.4.313.0/Include, -IE:/soft/glfw-3.4/include/, -IE:/workspace/vulkan-sandbox/include]
