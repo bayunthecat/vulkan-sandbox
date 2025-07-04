@@ -2,7 +2,7 @@
 #include "cglm/mat4.h"
 #include "cglm/types.h"
 #include "cglm/util.h"
-#include "cglm/vec3.h"
+#include "file_utils.h"
 #include "vulkan/vulkan_core.h"
 #include <GLFW/glfw3.h>
 #include <cglm/affine-mat.h>
@@ -110,7 +110,6 @@ void createDescriptorSetLayout() {
     printf("Unable to create descriptor set layout\n");
     exit(1);
   };
-  printf("createDescriptorSetLayout end\n");
 }
 
 VkVertexInputBindingDescription getBindDesc() {
@@ -227,7 +226,6 @@ void createUniformBuffers() {
                  VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT |
                      VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
                  &uniformBuffers[i], &uniformBuffersMemoryList[i]);
-    // TODO could be wrong
     vkMapMemory(device, uniformBuffersMemoryList[i], 0, bufferSize, 0,
                 &uniformBuffersMapped[i]);
   }
@@ -249,11 +247,9 @@ void createDescriptorPool() {
     printf("failed create descriptor pool\n");
     exit(1);
   };
-  printf("create descriptor pool end\n");
 }
 
 void createDescriptorSets() {
-  printf("create descriptor sets start\n");
   VkDescriptorSetLayout layouts[MAX_FRAMES_IN_FLIGHT];
   for (uint32_t i = 0; i < MAX_FRAMES_IN_FLIGHT; i++) {
     layouts[i] = descriptorLayout;
@@ -273,7 +269,6 @@ void createDescriptorSets() {
     printf("Unable to allocate descriptor sets\n");
     exit(1);
   }
-  printf("after mallocs\n");
   for (uint32_t i = 0; i < MAX_FRAMES_IN_FLIGHT; i++) {
     VkDescriptorBufferInfo bufferInfo = {
         .buffer = uniformBuffers[i],
@@ -289,10 +284,8 @@ void createDescriptorSets() {
         .descriptorCount = 1,
         .pBufferInfo = &bufferInfo,
     };
-    printf("before update desriptor set\n");
     vkUpdateDescriptorSets(device, 1, &write, 0, NULL);
   }
-  printf("create descriptor sets end\n");
 }
 
 void createVertexBuffer() {
@@ -480,29 +473,9 @@ void createImageViews() {
   }
 }
 
-uint32_t *loadRaw(const char *filepath, size_t *size) {
-  FILE *file = NULL;
-  int ret = fopen_s(&file, filepath, "rb");
-  if (ret != 0 || !file) {
-    fprintf(stderr, "Failed to open shader: %s, ret: %d\n", filepath, ret);
-    perror("");
-    exit(1);
-  }
-  fseek(file, 0, SEEK_END);
-  *size = ftell(file);
-  rewind(file);
-  uint32_t *code = malloc(*size);
-  if (code == NULL) {
-    printf("malloc failed\n");
-  }
-  fread(code, 1, *size, file);
-  fclose(file);
-  return code;
-}
-
 VkShaderModule createShaderModule(const char *filepath) {
   size_t size;
-  uint32_t *code = loadRaw(filepath, &size);
+  uint32_t *code = load(filepath, &size);
   VkShaderModuleCreateInfo info = {
       .sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO,
       .pCode = code,
