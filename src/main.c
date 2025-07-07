@@ -68,6 +68,8 @@ VkFence *inFlight;
 
 VkBuffer buffer;
 
+VkBuffer color;
+
 VkBuffer *uniformBuffers;
 
 VkDeviceMemory *uniformBuffersMemoryList;
@@ -286,6 +288,12 @@ void createDescriptorSets() {
     };
     vkUpdateDescriptorSets(device, 1, &write, 0, NULL);
   }
+}
+
+void createColorBuffer() {
+  VkBuffer stage;
+  VkDeviceMemory stageMem;
+  VkDeviceSize buffSize = sizeof(float) * 3;
 }
 
 void createVertexBuffer() {
@@ -537,7 +545,7 @@ void createGraphicsPipeline() {
       .width = (float)swapchainExtent.width,
       .height = (float)swapchainExtent.height,
       .minDepth = 0.0f,
-      .maxDepth = 0.0f,
+      .maxDepth = 1.0f,
   };
   VkRect2D scissor = {
       .offset = {0, 0},
@@ -830,12 +838,12 @@ void updateUniformBuffer(uint32_t currentImage) {
       .proj = GLM_MAT4_IDENTITY_INIT,
   };
   glm_rotate(ubo.model, time * glm_rad(90.0f), (vec3){0.0f, 0.0f, 1.0f});
-  vec3 eye = {2.0f, 2.0f, 2.0f};
+  vec3 eye = {0.5f, 0.5f, 0.5f};
   vec3 center = {0.0f, 0.0f, 0.0f};
   vec3 up = {0.0f, 0.0f, 1.0f};
   glm_lookat(eye, center, up, ubo.view);
   glm_perspective(glm_rad(45.0f),
-                  swapchainExtent.width / (float)swapchainExtent.height, 1.0f,
+                  swapchainExtent.width / (float)swapchainExtent.height, 0.0f,
                   10.0f, ubo.proj);
   ubo.proj[1][1] *= -1;
   memcpy(uniformBuffersMapped[currentImage], &ubo, sizeof(ubo));
