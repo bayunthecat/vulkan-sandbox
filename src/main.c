@@ -1,4 +1,5 @@
 #include "cglm/cam.h"
+#include "cglm/common.h"
 #include "cglm/mat4.h"
 #include "cglm/types.h"
 #include "cglm/util.h"
@@ -86,13 +87,18 @@ VkDescriptorPool descriptorPool;
 
 VkDescriptorSet *descriptorSets;
 
-const int MAX_FRAMES_IN_FLIGHT = 2;
+const int MAX_FRAMES_IN_FLIGHT = 3;
 
 uint32_t currentFrame = 0;
 
-float vertices[][2] = {
+vec2 vertices[6] = {
     {-0.5f, -0.5f}, {0.5f, -0.5f}, {0.5f, 0.5f},
     {-0.5f, -0.5f}, {0.5f, 0.5f},  {-0.5f, 0.5f},
+};
+
+vec3 colorVec[6] = {
+    {1.0f, 0.0f, 0.0f}, {0.0f, 1.0f, 0.0f}, {0.0f, 0.0f, 1.0f},
+    {1.0f, 0.0f, 0.0f}, {0.0f, 0.0f, 1.0f}, {1.0f, 1.0f, 1.0f},
 };
 
 void createDescriptorSetLayout() {
@@ -114,11 +120,30 @@ void createDescriptorSetLayout() {
   };
 }
 
+VkVertexInputBindingDescription getColorBindDesc() {
+  VkVertexInputBindingDescription desc = {
+      .binding = 1,
+      .inputRate = VK_VERTEX_INPUT_RATE_VERTEX,
+      .stride = sizeof(vec3),
+  };
+  return desc;
+}
+
 VkVertexInputBindingDescription getBindDesc() {
   VkVertexInputBindingDescription desc = {
       .binding = 0,
       .inputRate = VK_VERTEX_INPUT_RATE_VERTEX,
-      .stride = sizeof(float) * 2,
+      .stride = sizeof(vec2),
+  };
+  return desc;
+}
+
+VkVertexInputAttributeDescription getColorAttrDesc() {
+  VkVertexInputAttributeDescription desc = {
+      .binding = 1,
+      .location = 1,
+      .format = VK_FORMAT_R32G32B32_SFLOAT,
+      .offset = 0,
   };
   return desc;
 }
@@ -293,13 +318,28 @@ void createDescriptorSets() {
 void createColorBuffer() {
   VkBuffer stage;
   VkDeviceMemory stageMem;
-  VkDeviceSize buffSize = sizeof(float) * 3;
+  VkDeviceSize size = sizeof(vec3) * 6;
+  createBuffer(size, VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
+               VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT |
+                   VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
+               &stage, &stageMem);
+  void *data;
+  vkMapMemory(device, stageMem, 0, size, 0, &data);
+  memcpy(data, colorVec, size);
+  vkUnmapMemory(device, stageMem);
+  VkDeviceMemory colorMemory;
+  createBuffer(size,
+               VK_BUFFER_USAGE_TRANSFER_DST_BIT |
+                   VK_BUFFER_USAGE_VERTEX_BUFFER_BIT,
+               VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, &color, &colorMemory);
+  copyBuffer(stage, color, size);
+  vkDestroyBuffer(device, stage, NULL);
 }
 
 void createVertexBuffer() {
   VkBuffer stagingBuffer;
   VkDeviceMemory stagingMemory;
-  VkDeviceSize bufferSize = sizeof(float) * 2 * 6;
+  VkDeviceSize bufferSize = sizeof(vec2) * 6;
   createBuffer(bufferSize, VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
                VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT |
                    VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
@@ -525,13 +565,15 @@ void createGraphicsPipeline() {
       .dynamicStateCount = 2,
       .pDynamicStates = dynamicStates,
   };
-  VkVertexInputAttributeDescription attr[] = {getAttrDesc()};
-  VkVertexInputBindingDescription binds[] = {getBindDesc()};
+  // TODO need to add color description here
+  VkVertexInputAttributeDescription attr[] = {getAttrDesc(),
+                                              getColorAttrDesc()};
+  VkVertexInputBindingDescription binds[] = {getBindDesc(), getColorBindDesc()};
   VkPipelineVertexInputStateCreateInfo vertexInputInfo = {
       .sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO,
-      .vertexAttributeDescriptionCount = 1,
+      .vertexAttributeDescriptionCount = 2,
       .pVertexAttributeDescriptions = attr,
-      .vertexBindingDescriptionCount = 1,
+      .vertexBindingDescriptionCount = 2,
       .pVertexBindingDescriptions = binds,
   };
   VkPipelineInputAssemblyStateCreateInfo inputAssemblyInfo = {
@@ -770,6 +812,7 @@ void recordCommandBuffer(VkCommandBuffer commandBuffer, uint32_t imageIndex) {
   vkCmdSetScissor(commandBuffer, 0, 1, &scissor);
   VkDeviceSize offsets[] = {0};
   vkCmdBindVertexBuffers(commandBuffer, 0, 1, &buffer, offsets);
+  vkCmdBindVertexBuffers(commandBuffer, 1, 1, &color, offsets);
   vkCmdBindDescriptorSets(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS,
                           pipelineLayout, 0, 1, &descriptorSets[currentFrame],
                           0, NULL);
@@ -838,7 +881,7 @@ void updateUniformBuffer(uint32_t currentImage) {
       .proj = GLM_MAT4_IDENTITY_INIT,
   };
   glm_rotate(ubo.model, time * glm_rad(90.0f), (vec3){0.0f, 0.0f, 1.0f});
-  vec3 eye = {0.5f, 0.5f, 0.5f};
+  vec3 eye = {1.0f, 1.0f, 1.0f};
   vec3 center = {0.0f, 0.0f, 0.0f};
   vec3 up = {0.0f, 0.0f, 1.0f};
   glm_lookat(eye, center, up, ubo.view);
@@ -924,6 +967,7 @@ void initVulkan() {
   createCommandBuffers();
   createSyncObjects();
   createVertexBuffer();
+  createColorBuffer();
 }
 
 void mainLoop() {
@@ -957,6 +1001,14 @@ void destroySyncObjects() {
   free(inFlight);
 }
 
+void destroyUniformBuffers() {
+  for (uint32_t i = 0; i < MAX_FRAMES_IN_FLIGHT; i++) {
+    vkDestroyBuffer(device, uniformBuffers[i], NULL);
+    vkFreeMemory(device, uniformBuffersMemoryList[i], NULL);
+    free(uniformBuffersMapped[i]);
+  }
+}
+
 void cleanUp() {
   glfwDestroyWindow(window);
   glfwTerminate();
@@ -969,6 +1021,8 @@ void cleanUp() {
   vkDestroyRenderPass(device, renderPass, NULL);
   vkDestroyCommandPool(device, commandPool, NULL);
   vkDestroyBuffer(device, buffer, NULL);
+  vkDestroyBuffer(device, color, NULL);
+  destroyUniformBuffers();
   vkFreeMemory(device, memory, NULL);
   destroySyncObjects();
   vkDestroyDescriptorSetLayout(device, descriptorLayout, NULL);
