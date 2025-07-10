@@ -26,6 +26,12 @@ typedef struct {
   mat4 proj;
 } UniformBufferObject;
 
+typedef struct {
+  vec2 vertex;
+  vec3 color;
+  vec2 texture;
+} Vertex;
+
 GLFWwindow *window;
 
 VkInstance vkInstance;
@@ -80,14 +86,6 @@ VkBuffer vertexBuffer;
 
 VkDeviceMemory vertexBufferMemory;
 
-VkBuffer colorBuffer;
-
-VkDeviceMemory colorMemory;
-
-VkBuffer texCoordBuffer;
-
-VkDeviceMemory texCoordBufferMemory;
-
 VkBuffer indexBuffer;
 
 VkDeviceMemory indexBufferMemory;
@@ -110,28 +108,14 @@ const int MAX_FRAMES_IN_FLIGHT = 3;
 
 uint32_t currentFrame = 0;
 
-vec2 vertices[] = {
-    {-0.5f, -0.5f},
-    {0.5f, -0.5f},
-    {0.5f, 0.5f},
-    {-0.5f, 0.5f},
+Vertex vertices[] = {
+    {{-0.5f, -0.5f}, {1.0f, 0.0f, 0.0f}, {1.0f, 0.0f}},
+    {{0.5f, -0.5f}, {0.0f, 1.0f, 0.0f}, {0.0f, 0.0f}},
+    {{0.5f, 0.5f}, {0.0f, 0.0f, 1.0f}, {0.0f, 1.0f}},
+    {{-0.5f, 0.5f}, {1.0f, 1.0f, 1.0f}, {1.0f, 1.0f}},
 };
 
 uint32_t indices[] = {0, 1, 2, 2, 3, 0};
-
-vec3 colorVec[] = {
-    {1.0f, 0.0f, 0.0f},
-    {0.0f, 1.0f, 0.0f},
-    {0.0f, 0.0f, 1.0f},
-    {1.0f, 1.0f, 1.0f},
-};
-
-vec2 texCoord[] = {
-    {1.0f, 0.0f},
-    {0.0f, 0.0f},
-    {0.0f, 1.0f},
-    {1.0f, 1.0f},
-};
 
 void createDescriptorSetLayout() {
   VkDescriptorSetLayoutBinding uboLayoutBinding = {
@@ -163,59 +147,41 @@ void createDescriptorSetLayout() {
   };
 }
 
-VkVertexInputBindingDescription getColorBindDesc() {
-  VkVertexInputBindingDescription desc = {
-      .binding = 1,
-      .inputRate = VK_VERTEX_INPUT_RATE_VERTEX,
-      .stride = sizeof(vec3),
-  };
-  return desc;
-}
-
-VkVertexInputBindingDescription getBindDesc() {
+VkVertexInputBindingDescription getVertexBindDesc() {
   VkVertexInputBindingDescription desc = {
       .binding = 0,
       .inputRate = VK_VERTEX_INPUT_RATE_VERTEX,
-      .stride = sizeof(vec2),
+      .stride = sizeof(Vertex),
   };
   return desc;
 }
 
-VkVertexInputBindingDescription getTexCoordBindDesc() {
-  VkVertexInputBindingDescription desc = {
-      .binding = 2,
-      .inputRate = VK_VERTEX_INPUT_RATE_VERTEX,
-      .stride = sizeof(vec2),
+VkVertexInputAttributeDescription getVertexAttrDesc() {
+  VkVertexInputAttributeDescription desc = {
+      .binding = 0,
+      .location = 0,
+      .format = VK_FORMAT_R32G32_SFLOAT,
+      .offset = offsetof(Vertex, vertex),
   };
   return desc;
 }
 
 VkVertexInputAttributeDescription getColorAttrDesc() {
   VkVertexInputAttributeDescription desc = {
-      .binding = 1,
+      .binding = 0,
       .location = 1,
       .format = VK_FORMAT_R32G32B32_SFLOAT,
-      .offset = 0,
+      .offset = offsetof(Vertex, color),
   };
   return desc;
 }
 
-VkVertexInputAttributeDescription getAttrDesc() {
+VkVertexInputAttributeDescription getTextureAttrDesc() {
   VkVertexInputAttributeDescription desc = {
       .binding = 0,
-      .location = 0,
-      .format = VK_FORMAT_R32G32_SFLOAT,
-      .offset = 0,
-  };
-  return desc;
-}
-
-VkVertexInputAttributeDescription getTexCoordAttrDesc() {
-  VkVertexInputAttributeDescription desc = {
-      .binding = 2,
       .location = 2,
       .format = VK_FORMAT_R32G32_SFLOAT,
-      .offset = 0,
+      .offset = offsetof(Vertex, texture),
   };
   return desc;
 }
@@ -361,28 +327,6 @@ void copyBuffer(VkBuffer srcBuffer, VkBuffer dstBuffer, VkDeviceSize size) {
   vkFreeCommandBuffers(device, commandPool, 1, &commandBuffer);
 }
 
-void createTextureCoordinatesBuffer() {
-  VkBuffer stage;
-  VkDeviceMemory stageMem;
-  VkDeviceSize size = sizeof(vec2) * 4;
-  createBuffer(size, VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
-               VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT |
-                   VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
-               &stage, &stageMem);
-  void *data;
-  vkMapMemory(device, stageMem, 0, size, 0, &data);
-  memcpy(data, texCoord, size);
-  vkUnmapMemory(device, stageMem);
-  VkDeviceMemory texCoordMemory;
-  createBuffer(
-      size,
-      VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_VERTEX_BUFFER_BIT,
-      VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, &texCoordBuffer, &texCoordMemory);
-  copyBuffer(stage, texCoordBuffer, size);
-  vkFreeMemory(device, stageMem, NULL);
-  vkDestroyBuffer(device, stage, NULL);
-}
-
 void createIndexBuffer() {
   VkDeviceSize size = sizeof(uint32_t) * 6;
   VkBuffer stage;
@@ -515,26 +459,6 @@ void createDescriptorSets() {
   }
 }
 
-void createColorBuffer() {
-  VkBuffer stage;
-  VkDeviceMemory stageMem;
-  VkDeviceSize size = sizeof(vec3) * 4;
-  createBuffer(size, VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
-               VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT |
-                   VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
-               &stage, &stageMem);
-  void *data;
-  vkMapMemory(device, stageMem, 0, size, 0, &data);
-  memcpy(data, colorVec, size);
-  vkUnmapMemory(device, stageMem);
-  createBuffer(size,
-               VK_BUFFER_USAGE_TRANSFER_DST_BIT |
-                   VK_BUFFER_USAGE_VERTEX_BUFFER_BIT,
-               VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, &colorBuffer, &colorMemory);
-  copyBuffer(stage, colorBuffer, size);
-  vkDestroyBuffer(device, stage, NULL);
-}
-
 void createImage(uint32_t width, uint32_t height, VkFormat format,
                  VkImageTiling tiling, VkImageUsageFlags usage,
                  VkMemoryPropertyFlags props, VkImage *image,
@@ -544,8 +468,8 @@ void createImage(uint32_t width, uint32_t height, VkFormat format,
       .imageType = VK_IMAGE_TYPE_2D,
       .extent =
           {
-              .width = 512,
-              .height = 512,
+              .width = width,
+              .height = height,
               .depth = 1,
           },
       .mipLevels = 1,
@@ -563,7 +487,6 @@ void createImage(uint32_t width, uint32_t height, VkFormat format,
   }
   VkMemoryRequirements memReq;
   vkGetImageMemoryRequirements(device, *image, &memReq);
-  printf("req mem size: %lld\n", memReq.size);
 
   VkMemoryAllocateInfo allocInfo = {
       .sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO,
@@ -606,29 +529,26 @@ void createTextureImage() {
   VkDeviceSize dSize = texWidth * texHeight * 4;
   VkBuffer stage;
   VkDeviceMemory stageMem;
-  printf("device memory: %lld\n", dSize);
   createBuffer(dSize, VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
                VK_MEMORY_PROPERTY_HOST_COHERENT_BIT |
                    VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT,
                &stage, &stageMem);
-  printf("after create buffer for image\n");
   void *data;
   vkMapMemory(device, stageMem, 0, dSize, 0, &data);
   memcpy(data, pixels, dSize);
   vkUnmapMemory(device, stageMem);
   free(pixels);
-  printf("after map\n");
 
-  createImage(512, 512, VK_FORMAT_R8G8B8A8_SRGB, VK_IMAGE_TILING_OPTIMAL,
+  createImage(texWidth, texHeight, VK_FORMAT_R8G8B8A8_SRGB,
+              VK_IMAGE_TILING_OPTIMAL,
               VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT,
               VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT |
                   VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
               &textureImage, &textureMem);
-  printf("before transistion\n");
   transitionImageLayout(textureImage, VK_FORMAT_R8G8B8A8_SRGB,
                         VK_IMAGE_LAYOUT_UNDEFINED,
                         VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
-  copyBufferToImage(stage, textureImage, 512, 512);
+  copyBufferToImage(stage, textureImage, texWidth, texHeight);
   transitionImageLayout(textureImage, VK_FORMAT_R8G8B8A8_SRGB,
                         VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
                         VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
@@ -684,7 +604,7 @@ void createTextureSampler() {
 void createVertexBuffer() {
   VkBuffer stagingBuffer;
   VkDeviceMemory stagingMemory;
-  VkDeviceSize bufferSize = sizeof(vec2) * 4;
+  VkDeviceSize bufferSize = sizeof(Vertex) * 4;
   createBuffer(bufferSize, VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
                VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT |
                    VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
@@ -913,20 +833,18 @@ void createGraphicsPipeline() {
       .pDynamicStates = dynamicStates,
   };
   VkVertexInputAttributeDescription attr[] = {
-      getAttrDesc(),
+      getVertexAttrDesc(),
       getColorAttrDesc(),
-      getTexCoordAttrDesc(),
+      getTextureAttrDesc(),
   };
   VkVertexInputBindingDescription binds[] = {
-      getBindDesc(),
-      getColorBindDesc(),
-      getTexCoordBindDesc(),
+      getVertexBindDesc(),
   };
   VkPipelineVertexInputStateCreateInfo vertexInputInfo = {
       .sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO,
       .vertexAttributeDescriptionCount = 3,
       .pVertexAttributeDescriptions = attr,
-      .vertexBindingDescriptionCount = 3,
+      .vertexBindingDescriptionCount = 1,
       .pVertexBindingDescriptions = binds,
   };
   VkPipelineInputAssemblyStateCreateInfo inputAssemblyInfo = {
@@ -1165,8 +1083,6 @@ void recordCommandBuffer(VkCommandBuffer commandBuffer, uint32_t imageIndex) {
   vkCmdSetScissor(commandBuffer, 0, 1, &scissor);
   VkDeviceSize offsets[] = {0};
   vkCmdBindVertexBuffers(commandBuffer, 0, 1, &vertexBuffer, offsets);
-  vkCmdBindVertexBuffers(commandBuffer, 1, 1, &colorBuffer, offsets);
-  vkCmdBindVertexBuffers(commandBuffer, 2, 1, &texCoordBuffer, offsets);
   vkCmdBindDescriptorSets(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS,
                           pipelineLayout, 0, 1, &descriptorSets[currentFrame],
                           0, NULL);
@@ -1325,10 +1241,8 @@ void initVulkan() {
   createDescriptorSets();
   createCommandBuffers();
   createSyncObjects();
-  createTextureCoordinatesBuffer();
   createVertexBuffer();
   createIndexBuffer();
-  createColorBuffer();
 }
 
 void mainLoop() {
@@ -1382,7 +1296,6 @@ void cleanUp() {
   vkDestroyRenderPass(device, renderPass, NULL);
   vkDestroyCommandPool(device, commandPool, NULL);
   vkDestroyBuffer(device, vertexBuffer, NULL);
-  vkDestroyBuffer(device, colorBuffer, NULL);
   destroyUniformBuffers();
   vkFreeMemory(device, vertexBufferMemory, NULL);
   destroySyncObjects();
