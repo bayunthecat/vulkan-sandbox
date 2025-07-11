@@ -27,7 +27,7 @@ typedef struct {
 } UniformBufferObject;
 
 typedef struct {
-  vec2 vertex;
+  vec3 vertex;
   vec3 color;
   vec2 texture;
 } Vertex;
@@ -45,6 +45,12 @@ VkQueue queue;
 VkImage textureImage;
 
 VkImageView textureImageView;
+
+VkImage depthImage;
+
+VkImageView depthImageView;
+
+VkDeviceMemory depthImageMemory;
 
 VkSampler textureSampler;
 
@@ -109,13 +115,18 @@ const int MAX_FRAMES_IN_FLIGHT = 3;
 uint32_t currentFrame = 0;
 
 Vertex vertices[] = {
-    {{-0.5f, -0.5f}, {1.0f, 0.0f, 0.0f}, {1.0f, 0.0f}},
-    {{0.5f, -0.5f}, {0.0f, 1.0f, 0.0f}, {0.0f, 0.0f}},
-    {{0.5f, 0.5f}, {0.0f, 0.0f, 1.0f}, {0.0f, 1.0f}},
-    {{-0.5f, 0.5f}, {1.0f, 1.0f, 1.0f}, {1.0f, 1.0f}},
+    {{-0.5f, -0.5f, 0.0f}, {1.0f, 0.0f, 0.0f}, {1.0f, 0.0f}},
+    {{0.5f, -0.5f, 0.0f}, {0.0f, 1.0f, 0.0f}, {0.0f, 0.0f}},
+    {{0.5f, 0.5f, 0.0f}, {0.0f, 0.0f, 1.0f}, {0.0f, 1.0f}},
+    {{-0.5f, 0.5f, 0.0f}, {1.0f, 1.0f, 1.0f}, {1.0f, 1.0f}},
+
+    {{-0.5f, -0.5f, -0.5f}, {1.0f, 0.0f, 0.0f}, {1.0f, 0.0f}},
+    {{0.5f, -0.5f, -0.5f}, {0.0f, 1.0f, 0.0f}, {0.0f, 0.0f}},
+    {{0.5f, 0.5f, -0.5f}, {0.0f, 0.0f, 1.0f}, {0.0f, 1.0f}},
+    {{-0.5f, 0.5f, -0.5f}, {1.0f, 1.0f, 1.0f}, {1.0f, 1.0f}},
 };
 
-uint32_t indices[] = {0, 1, 2, 2, 3, 0};
+uint32_t indices[] = {0, 1, 2, 2, 3, 0, 4, 5, 6, 6, 7, 4};
 
 void createDescriptorSetLayout() {
   VkDescriptorSetLayoutBinding uboLayoutBinding = {
@@ -160,7 +171,7 @@ VkVertexInputAttributeDescription getVertexAttrDesc() {
   VkVertexInputAttributeDescription desc = {
       .binding = 0,
       .location = 0,
-      .format = VK_FORMAT_R32G32_SFLOAT,
+      .format = VK_FORMAT_R32G32B32_SFLOAT,
       .offset = offsetof(Vertex, vertex),
   };
   return desc;
@@ -328,7 +339,7 @@ void copyBuffer(VkBuffer srcBuffer, VkBuffer dstBuffer, VkDeviceSize size) {
 }
 
 void createIndexBuffer() {
-  VkDeviceSize size = sizeof(uint32_t) * 6;
+  VkDeviceSize size = sizeof(uint32_t) * 12;
   VkBuffer stage;
   VkDeviceMemory stageMemory;
   createBuffer(size, VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
@@ -604,7 +615,7 @@ void createTextureSampler() {
 void createVertexBuffer() {
   VkBuffer stagingBuffer;
   VkDeviceMemory stagingMemory;
-  VkDeviceSize bufferSize = sizeof(Vertex) * 4;
+  VkDeviceSize bufferSize = sizeof(Vertex) * 8;
   createBuffer(bufferSize, VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
                VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT |
                    VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
@@ -756,6 +767,30 @@ void createSwapchain() {
   swapchainExtent = extent;
 }
 
+VkImageView createImageView(VkImage image, VkFormat format,
+                            VkImageAspectFlags aspectFlags) {
+  VkImageViewCreateInfo info = {
+      .sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO,
+      .image = image,
+      .viewType = VK_IMAGE_VIEW_TYPE_2D,
+      .format = format,
+      .subresourceRange =
+          {
+              .aspectMask = aspectFlags,
+              .baseMipLevel = 0,
+              .levelCount = 1,
+              .baseArrayLayer = 0,
+              .layerCount = 1,
+          },
+  };
+  VkImageView imageView;
+  if (vkCreateImageView(device, &info, NULL, &imageView) != VK_SUCCESS) {
+    printf("failed to create image view\n");
+    exit(1);
+  }
+  return imageView;
+}
+
 void createImageViews() {
   printf("creating image views\n");
   swapchainImageViews = malloc(sizeof(VkImageView) * imageCount);
@@ -764,27 +799,8 @@ void createImageViews() {
     exit(1);
   }
   for (uint32_t i = 0; i < imageCount; i++) {
-    VkImageViewCreateInfo info = {
-        .sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO,
-        .image = swapchainImages[i],
-        .viewType = VK_IMAGE_VIEW_TYPE_2D,
-        .format = swapchainImageFormat,
-        .components.r = VK_COMPONENT_SWIZZLE_IDENTITY,
-        .components.g = VK_COMPONENT_SWIZZLE_IDENTITY,
-        .components.b = VK_COMPONENT_SWIZZLE_IDENTITY,
-        .components.a = VK_COMPONENT_SWIZZLE_IDENTITY,
-        .subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
-        .subresourceRange.baseMipLevel = 0,
-        .subresourceRange.levelCount = 1,
-        .subresourceRange.baseArrayLayer = 0,
-        .subresourceRange.layerCount = 1,
-    };
-    VkResult result =
-        vkCreateImageView(device, &info, NULL, &swapchainImageViews[i]);
-    if (result != VK_SUCCESS) {
-      printf("failed to create image view: %d\n", result);
-      exit(1);
-    }
+    swapchainImageViews[i] = createImageView(
+        swapchainImages[i], swapchainImageFormat, VK_IMAGE_ASPECT_COLOR_BIT);
   }
 }
 
@@ -1088,7 +1104,7 @@ void recordCommandBuffer(VkCommandBuffer commandBuffer, uint32_t imageIndex) {
                           0, NULL);
   vkCmdBindIndexBuffer(commandBuffer, indexBuffer, 0, VK_INDEX_TYPE_UINT32);
 
-  vkCmdDrawIndexed(commandBuffer, 6, 1, 0, 0, 0);
+  vkCmdDrawIndexed(commandBuffer, 12, 1, 0, 0, 0);
   vkCmdEndRenderPass(commandBuffer);
   VkResult endBufferResult = vkEndCommandBuffer(commandBuffer);
   if (endBufferResult != VK_SUCCESS) {
@@ -1209,6 +1225,15 @@ void drawFrame() {
   currentFrame = (currentFrame + 1) % MAX_FRAMES_IN_FLIGHT;
 }
 
+void createDepthResources() {
+  // TODO specify depth format
+  VkFormat depthFormat = {};
+  createImage(
+      swapchainExtent.width, swapchainExtent.height, depthFormat,
+      VK_IMAGE_TILING_OPTIMAL, VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT,
+      VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, &depthImage, &depthImageMemory);
+}
+
 void initWindow() {
   if (!glfwInit()) {
     printf("failed to init GLFW\n");
@@ -1233,6 +1258,7 @@ void initVulkan() {
   createGraphicsPipeline();
   createFramebuffers();
   createCommandPool();
+  // createDepthResources();
   createTextureImage();
   createTextureImageView();
   createTextureSampler();
