@@ -1,3 +1,5 @@
+#define GLM_FORCE_RADIANS
+#define GLM_FORCE_DEPTH_ZERO_TO_ONE
 #include "cglm/cam.h"
 #include "cglm/common.h"
 #include "cglm/mat4.h"
@@ -270,8 +272,15 @@ void transitionImageLayout(VkImage image, VkFormat format,
     barrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
     sourceStage = VK_PIPELINE_STAGE_TRANSFER_BIT;
     destinationStage = VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT;
+  } else if (oldLayout == VK_IMAGE_LAYOUT_UNDEFINED &&
+             newLayout == VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL) {
+    barrier.srcAccessMask = 0;
+    barrier.dstAccessMask = VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_READ_BIT |
+                            VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
+    sourceStage = VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT;
+    destinationStage = VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT;
   } else {
-    printf("unsupported transistion\n");
+    printf("unsupported ransistion\n");
     exit(1);
   }
   vkCmdPipelineBarrier(cmdBuff, sourceStage, destinationStage, 0, 0, NULL, 0,
@@ -508,7 +517,7 @@ void createImage(uint32_t width, uint32_t height, VkFormat format,
     printf("failed to allocate image memory\n");
     exit(1);
   }
-  vkBindImageMemory(device, textureImage, textureMem, 0);
+  vkBindImageMemory(device, *image, *imageMemory, 0);
 }
 
 void copyBufferToImage(VkBuffer buffer, VkImage image, uint32_t width,
@@ -916,6 +925,14 @@ void createGraphicsPipeline() {
       .pAttachments = &colorBlendAttachment,
       .blendConstants = {0.0f, 0.0f, 0.0f, 0.0f},
   };
+  VkPipelineDepthStencilStateCreateInfo depthStencilInfo = {
+      .sType = VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO,
+      .depthTestEnable = VK_TRUE,
+      .depthWriteEnable = VK_TRUE,
+      .depthCompareOp = VK_COMPARE_OP_LESS,
+      .depthBoundsTestEnable = VK_FALSE,
+      .stencilTestEnable = VK_FALSE,
+  };
   VkPipelineLayoutCreateInfo pipelineLayoutInfo = {
       .sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO,
       .setLayoutCount = 1,
@@ -943,6 +960,7 @@ void createGraphicsPipeline() {
       .renderPass = renderPass,
       .subpass = 0,
       .basePipelineHandle = VK_NULL_HANDLE,
+      .pDepthStencilState = &depthStencilInfo,
   };
   VkResult pipelineResult = vkCreateGraphicsPipelines(
       device, VK_NULL_HANDLE, 1, &pipelineInfo, NULL, &pipeline);
@@ -965,27 +983,46 @@ void createRenderPass() {
       .initialLayout = VK_IMAGE_LAYOUT_UNDEFINED,
       .finalLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR,
   };
+  VkAttachmentDescription depthAttachment = {
+      .format = VK_FORMAT_D32_SFLOAT,
+      .samples = VK_SAMPLE_COUNT_1_BIT,
+      .loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR,
+      .storeOp = VK_ATTACHMENT_STORE_OP_DONT_CARE,
+      .stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE,
+      .stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE,
+      .initialLayout = VK_IMAGE_LAYOUT_UNDEFINED,
+      .finalLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
+  };
   VkAttachmentReference colorAttachmentRef = {
       .attachment = 0,
       .layout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+  };
+  VkAttachmentReference depthAttachmentRef = {
+      .attachment = 1,
+      .layout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
   };
   VkSubpassDescription subpass = {
       .pipelineBindPoint = VK_PIPELINE_BIND_POINT_GRAPHICS,
       .colorAttachmentCount = 1,
       .pColorAttachments = &colorAttachmentRef,
+      .pDepthStencilAttachment = &depthAttachmentRef,
   };
   VkSubpassDependency dependency = {
       .srcSubpass = VK_SUBPASS_EXTERNAL,
       .dstSubpass = 0,
-      .srcStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
+      .srcStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT |
+                      VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT,
       .srcAccessMask = 0,
-      .dstStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
-      .dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT,
+      .dstStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT |
+                      VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT,
+      .dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT |
+                       VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT,
   };
+  VkAttachmentDescription attachments[] = {colorAttachment, depthAttachment};
   VkRenderPassCreateInfo renderPassInfo = {
       .sType = VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO,
-      .attachmentCount = 1,
-      .pAttachments = &colorAttachment,
+      .attachmentCount = 2,
+      .pAttachments = attachments,
       .subpassCount = 1,
       .pSubpasses = &subpass,
       .dependencyCount = 1,
@@ -1007,12 +1044,14 @@ void createFramebuffers() {
     exit(1);
   }
   for (uint32_t i = 0; i < imageCount; i++) {
-    printf("creating a framebuffer\n");
-    VkImageView attachments[] = {swapchainImageViews[i]};
+    VkImageView attachments[] = {
+        swapchainImageViews[i],
+        depthImageView,
+    };
     VkFramebufferCreateInfo framebufferInfo = {
         .sType = VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO,
         .renderPass = renderPass,
-        .attachmentCount = 1,
+        .attachmentCount = 2,
         .pAttachments = attachments,
         .width = swapchainExtent.width,
         .height = swapchainExtent.height,
@@ -1069,16 +1108,20 @@ void recordCommandBuffer(VkCommandBuffer commandBuffer, uint32_t imageIndex) {
     exit(1);
   }
   VkClearValue clearColor = {
-      .color.float32 = {0.0f, 0.0f, 0.0f, 1.0f},
+      .color = {{0.0f, 0.0f, 0.0f, 1.0f}},
   };
+  VkClearValue clearDepth = {
+      .depthStencil = {1.0f, 0},
+  };
+  VkClearValue clears[] = {clearColor, clearDepth};
   VkRenderPassBeginInfo renderPassInfo = {
       .sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO,
       .renderPass = renderPass,
       .framebuffer = framebuffers[imageIndex],
       .renderArea.offset = {0, 0},
       .renderArea.extent = swapchainExtent,
-      .pClearValues = &clearColor,
-      .clearValueCount = 1,
+      .pClearValues = clears,
+      .clearValueCount = 2,
   };
   vkCmdBeginRenderPass(commandBuffer, &renderPassInfo,
                        VK_SUBPASS_CONTENTS_INLINE);
@@ -1174,7 +1217,7 @@ void updateUniformBuffer(uint32_t currentImage) {
   vec3 up = {0.0f, 0.0f, 1.0f};
   glm_lookat(eye, center, up, ubo.view);
   glm_perspective(glm_rad(45.0f),
-                  swapchainExtent.width / (float)swapchainExtent.height, 0.0f,
+                  swapchainExtent.width / (float)swapchainExtent.height, 0.1f,
                   10.0f, ubo.proj);
   ubo.proj[1][1] *= -1;
   memcpy(uniformBuffersMapped[currentImage], &ubo, sizeof(ubo));
@@ -1226,12 +1269,13 @@ void drawFrame() {
 }
 
 void createDepthResources() {
-  // TODO specify depth format
-  VkFormat depthFormat = {};
+  VkFormat depthFormat = VK_FORMAT_D32_SFLOAT;
   createImage(
       swapchainExtent.width, swapchainExtent.height, depthFormat,
       VK_IMAGE_TILING_OPTIMAL, VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT,
       VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, &depthImage, &depthImageMemory);
+  depthImageView =
+      createImageView(depthImage, depthFormat, VK_IMAGE_ASPECT_DEPTH_BIT);
 }
 
 void initWindow() {
@@ -1256,9 +1300,9 @@ void initVulkan() {
   createRenderPass();
   createDescriptorSetLayout();
   createGraphicsPipeline();
-  createFramebuffers();
   createCommandPool();
-  // createDepthResources();
+  createDepthResources();
+  createFramebuffers();
   createTextureImage();
   createTextureImageView();
   createTextureSampler();
