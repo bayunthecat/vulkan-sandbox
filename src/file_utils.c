@@ -5,7 +5,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 
-uint32_t *load(const char *filepath, size_t *size) {
+void *load(const char *filepath, size_t *size) {
   FILE *file = NULL;
   int ret = fopen_s(&file, filepath, "rb");
   if (ret != 0 || !file) {
@@ -16,7 +16,7 @@ uint32_t *load(const char *filepath, size_t *size) {
   fseek(file, 0, SEEK_END);
   *size = ftell(file);
   rewind(file);
-  uint32_t *content = malloc(*size);
+  void *content = malloc(*size);
   if (content == NULL) {
     printf("malloc failed\n");
   }

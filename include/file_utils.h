@@ -3,6 +3,6 @@
 
 #include <stdint.h>
 
-uint32_t *load(const char *filepath, size_t *size);
+void *load(const char *filepath, size_t *size);
 
 #endif

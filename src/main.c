@@ -1,5 +1,6 @@
 #define GLM_FORCE_RADIANS
 #define GLM_FORCE_DEPTH_ZERO_TO_ONE
+#define TINYOBJ_LOADER_C_IMPLEMENTATION
 #include "cglm/cam.h"
 #include "cglm/common.h"
 #include "cglm/mat4.h"
@@ -7,6 +8,7 @@
 #include "cglm/util.h"
 #include "file_utils.h"
 #include "stb_image.h"
+#include "tinyobj_loader_c.h"
 #include "vulkan/vulkan_core.h"
 #include <GLFW/glfw3.h>
 #include <cglm/affine-mat.h>
@@ -1286,6 +1288,24 @@ void initWindow() {
   glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
   glfwWindowHint(GLFW_RESIZABLE, GLFW_FALSE);
   window = glfwCreateWindow(800, 600, "Learn Vulkan", NULL, NULL);
+}
+
+void loadFile(void *ctx, const char *filename, const int isMtl,
+              const char *objFilename, char **data, size_t *len) {
+  *data = load(filename, len);
+}
+
+void loadModel() {
+  tinyobj_attrib_t attrib;
+  tinyobj_shape_t *shapes;
+  tinyobj_material_t *materials;
+
+  size_t numShapes;
+  size_t numMaterials;
+  const char *filename = "assets/model.obj";
+
+  tinyobj_parse_obj(&attrib, &shapes, &numShapes, &materials, &numMaterials,
+                    filename, loadFile, NULL, TINYOBJ_FLAG_TRIANGULATE);
 }
 
 void initVulkan() {
