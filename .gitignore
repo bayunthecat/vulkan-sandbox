@@ -1,3 +1,3 @@
 *.exe
-lib
-build
+lib/
+build/

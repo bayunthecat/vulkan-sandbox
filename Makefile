@@ -7,7 +7,7 @@ OBJECTS = $(patsubst src/%.c, build/%.o, $(SOURCES))
 all: build app
 
 build:
-	mkdir -p build
+	mkdir build
 
 build/%.o: src/%.c
 	clang -v $(CFLAGS) -c $< -o $@ 
