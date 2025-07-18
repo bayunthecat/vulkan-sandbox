@@ -118,6 +118,22 @@ const int MAX_FRAMES_IN_FLIGHT = 3;
 
 uint32_t currentFrame = 0;
 
+Vertex *facesVertices;
+
+uint32_t facesVerticesNum = 0;
+
+VkBuffer facesBuffer;
+
+VkDeviceMemory facesBufferMemory;
+
+VkBuffer modelBuffer;
+
+VkDeviceMemory modelBufferMemory;
+
+Vertex *modelVertices;
+
+int modelVerticesNum;
+
 Vertex vertices[] = {
     {{-0.5f, -0.5f, 0.0f}, {1.0f, 0.0f, 0.0f}, {1.0f, 0.0f}},
     {{0.5f, -0.5f, 0.0f}, {0.0f, 1.0f, 0.0f}, {0.0f, 0.0f}},
@@ -1143,13 +1159,15 @@ void recordCommandBuffer(VkCommandBuffer commandBuffer, uint32_t imageIndex) {
   };
   vkCmdSetScissor(commandBuffer, 0, 1, &scissor);
   VkDeviceSize offsets[] = {0};
-  vkCmdBindVertexBuffers(commandBuffer, 0, 1, &vertexBuffer, offsets);
+  vkCmdBindVertexBuffers(commandBuffer, 0, 1, &modelBuffer, offsets);
+  // vkCmdBindVertexBuffers(commandBuffer, 0, 1, &vertexBuffer, offsets);
   vkCmdBindDescriptorSets(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS,
                           pipelineLayout, 0, 1, &descriptorSets[currentFrame],
                           0, NULL);
-  vkCmdBindIndexBuffer(commandBuffer, indexBuffer, 0, VK_INDEX_TYPE_UINT32);
+  // vkCmdBindIndexBuffer(commandBuffer, indexBuffer, 0, VK_INDEX_TYPE_UINT32);
 
-  vkCmdDrawIndexed(commandBuffer, 12, 1, 0, 0, 0);
+  vkCmdDraw(commandBuffer, modelVerticesNum, 1, 0, 0);
+  // vkCmdDrawIndexed(commandBuffer, 12, 1, 0, 0, 0);
   vkCmdEndRenderPass(commandBuffer);
   VkResult endBufferResult = vkEndCommandBuffer(commandBuffer);
   if (endBufferResult != VK_SUCCESS) {
@@ -1292,7 +1310,11 @@ void initWindow() {
 
 void loadFile(void *ctx, const char *filename, const int isMtl,
               const char *objFilename, char **data, size_t *len) {
+  if (isMtl == 1) {
+    return;
+  }
   *data = load(filename, len);
+  printf("load file len: %lld\n", *len);
 }
 
 void loadModel() {
@@ -1302,10 +1324,62 @@ void loadModel() {
 
   size_t numShapes;
   size_t numMaterials;
-  const char *filename = "assets/model.obj";
+  const char *filename = "assets/viking_room.obj";
 
-  tinyobj_parse_obj(&attrib, &shapes, &numShapes, &materials, &numMaterials,
-                    filename, loadFile, NULL, TINYOBJ_FLAG_TRIANGULATE);
+  int error =
+      tinyobj_parse_obj(&attrib, &shapes, &numShapes, &materials, &numMaterials,
+                        filename, loadFile, NULL, TINYOBJ_FLAG_TRIANGULATE);
+  if (error != TINYOBJ_SUCCESS) {
+    printf("Failed to load model, error: %d\n", error);
+    exit(1);
+  }
+  modelVertices = malloc(sizeof(Vertex) * attrib.num_vertices);
+  modelVerticesNum = attrib.num_vertices;
+
+  int row = 0;
+  int cols = 3;
+  for (uint32_t i = 0; i < attrib.num_vertices; i++) {
+    modelVertices[i].color[0] = 0.1f;
+    modelVertices[i].color[0] = 0.0f;
+    modelVertices[i].color[0] = 0.0f;
+    for (uint32_t j = 0; j < 3; j++) {
+      modelVertices[i].vertex[j] = attrib.vertices[(i * cols) + j];
+    }
+    row++;
+  }
+  printf("num_face_num_verts: %d, num_faces: %d, \n", attrib.num_face_num_verts,
+         attrib.num_faces);
+
+  facesVertices = malloc(sizeof(Vertex) * attrib.num_face_num_verts);
+
+  Vertex last = modelVertices[modelVerticesNum - 1];
+  Vertex first = modelVertices[0];
+  printf("first vertex: %f, %f, %f\n", first.vertex[0], first.vertex[1],
+         first.vertex[2]);
+  printf("last vertex: %f, %f, %f\n", last.vertex[0], last.vertex[1],
+         last.vertex[2]);
+}
+
+void createModelBuffer() {
+  VkBuffer stagingBuffer;
+  VkDeviceMemory stagingMemory;
+  VkDeviceSize bufferSize = sizeof(Vertex) * modelVerticesNum;
+  createBuffer(bufferSize, VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
+               VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT |
+                   VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
+               &stagingBuffer, &stagingMemory);
+
+  void *data;
+  vkMapMemory(device, stagingMemory, 0, bufferSize, 0, &data);
+  memcpy(data, modelVertices, bufferSize);
+  vkUnmapMemory(device, stagingMemory);
+  createBuffer(
+      bufferSize,
+      VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_VERTEX_BUFFER_BIT,
+      VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, &modelBuffer, &modelBufferMemory);
+  copyBuffer(stagingBuffer, modelBuffer, bufferSize);
+  vkDestroyBuffer(device, stagingBuffer, NULL);
+  vkFreeMemory(device, stagingMemory, NULL);
 }
 
 void initVulkan() {
@@ -1332,6 +1406,8 @@ void initVulkan() {
   createCommandBuffers();
   createSyncObjects();
   createVertexBuffer();
+  loadModel();
+  createModelBuffer();
   createIndexBuffer();
 }
 
