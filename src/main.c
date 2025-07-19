@@ -118,21 +118,29 @@ const int MAX_FRAMES_IN_FLIGHT = 3;
 
 uint32_t currentFrame = 0;
 
-Vertex *facesVertices;
-
-uint32_t facesVerticesNum = 0;
-
-VkBuffer facesBuffer;
-
-VkDeviceMemory facesBufferMemory;
-
 VkBuffer modelBuffer;
 
 VkDeviceMemory modelBufferMemory;
 
+vec3 *modelVerts;
+
+uint32_t modelVertsNum;
+
+vec2 *texCoords;
+
+uint32_t numTexCoords;
+
 Vertex *modelVertices;
 
 int modelVerticesNum;
+
+uint32_t *modelIndices;
+
+uint32_t modelIndicesNum;
+
+VkBuffer modelIndiciesBuffer;
+
+VkDeviceMemory modelIndicesBufferMemory;
 
 Vertex vertices[] = {
     {{-0.5f, -0.5f, 0.0f}, {1.0f, 0.0f, 0.0f}, {1.0f, 0.0f}},
@@ -562,7 +570,7 @@ void copyBufferToImage(VkBuffer buffer, VkImage image, uint32_t width,
 
 void createTextureImage() {
   int texWidth, texHeight, texChannels;
-  stbi_uc *pixels = stbi_load("assets/texture.jpg", &texWidth, &texHeight,
+  stbi_uc *pixels = stbi_load("assets/viking_room.png", &texWidth, &texHeight,
                               &texChannels, STBI_rgb_alpha);
   VkDeviceSize dSize = texWidth * texHeight * 4;
   VkBuffer stage;
@@ -1160,14 +1168,10 @@ void recordCommandBuffer(VkCommandBuffer commandBuffer, uint32_t imageIndex) {
   vkCmdSetScissor(commandBuffer, 0, 1, &scissor);
   VkDeviceSize offsets[] = {0};
   vkCmdBindVertexBuffers(commandBuffer, 0, 1, &modelBuffer, offsets);
-  // vkCmdBindVertexBuffers(commandBuffer, 0, 1, &vertexBuffer, offsets);
   vkCmdBindDescriptorSets(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS,
                           pipelineLayout, 0, 1, &descriptorSets[currentFrame],
                           0, NULL);
-  // vkCmdBindIndexBuffer(commandBuffer, indexBuffer, 0, VK_INDEX_TYPE_UINT32);
-
   vkCmdDraw(commandBuffer, modelVerticesNum, 1, 0, 0);
-  // vkCmdDrawIndexed(commandBuffer, 12, 1, 0, 0, 0);
   vkCmdEndRenderPass(commandBuffer);
   VkResult endBufferResult = vkEndCommandBuffer(commandBuffer);
   if (endBufferResult != VK_SUCCESS) {
@@ -1231,8 +1235,8 @@ void updateUniformBuffer(uint32_t currentImage) {
       .view = GLM_MAT4_IDENTITY_INIT,
       .proj = GLM_MAT4_IDENTITY_INIT,
   };
-  glm_rotate(ubo.model, time * glm_rad(90.0f), (vec3){0.0f, 0.0f, 1.0f});
-  vec3 eye = {1.0f, 1.0f, 1.0f};
+  glm_rotate(ubo.model, time / 50 * glm_rad(90.0f), (vec3){0.0f, 0.0f, 1.0f});
+  vec3 eye = {1.5f, 1.5f, 1.5f};
   vec3 center = {0.0f, 0.0f, 0.0f};
   vec3 up = {0.0f, 0.0f, 1.0f};
   glm_lookat(eye, center, up, ubo.view);
@@ -1317,47 +1321,46 @@ void loadFile(void *ctx, const char *filename, const int isMtl,
   printf("load file len: %lld\n", *len);
 }
 
-void loadModel() {
+void loadModel(const char *filename, Vertex **vertices, int *numVertices) {
   tinyobj_attrib_t attrib;
   tinyobj_shape_t *shapes;
   tinyobj_material_t *materials;
-
   size_t numShapes;
   size_t numMaterials;
-  const char *filename = "assets/viking_room.obj";
-
-  int error =
+  int result =
       tinyobj_parse_obj(&attrib, &shapes, &numShapes, &materials, &numMaterials,
                         filename, loadFile, NULL, TINYOBJ_FLAG_TRIANGULATE);
-  if (error != TINYOBJ_SUCCESS) {
-    printf("Failed to load model, error: %d\n", error);
+  if (result != TINYOBJ_SUCCESS) {
+    printf("Failed to load model, error: %d\n", result);
     exit(1);
   }
-  modelVertices = malloc(sizeof(Vertex) * attrib.num_vertices);
-  modelVerticesNum = attrib.num_vertices;
-
-  int row = 0;
-  int cols = 3;
+  vec3 verts[attrib.num_vertices];
   for (uint32_t i = 0; i < attrib.num_vertices; i++) {
-    modelVertices[i].color[0] = 0.1f;
-    modelVertices[i].color[0] = 0.0f;
-    modelVertices[i].color[0] = 0.0f;
-    for (uint32_t j = 0; j < 3; j++) {
-      modelVertices[i].vertex[j] = attrib.vertices[(i * cols) + j];
-    }
-    row++;
+    verts[i][0] = attrib.vertices[i * 3 + 0];
+    verts[i][1] = attrib.vertices[i * 3 + 1];
+    verts[i][2] = attrib.vertices[i * 3 + 2];
   }
-  printf("num_face_num_verts: %d, num_faces: %d, \n", attrib.num_face_num_verts,
-         attrib.num_faces);
+  vec2 texCoords[attrib.num_texcoords];
+  for (uint32_t i = 0; i < attrib.num_texcoords; i++) {
+    texCoords[i][0] = attrib.texcoords[i * 2 + 0];
+    texCoords[i][1] = 1.0f - attrib.texcoords[i * 2 + 1];
+  }
 
-  facesVertices = malloc(sizeof(Vertex) * attrib.num_face_num_verts);
-
-  Vertex last = modelVertices[modelVerticesNum - 1];
-  Vertex first = modelVertices[0];
-  printf("first vertex: %f, %f, %f\n", first.vertex[0], first.vertex[1],
-         first.vertex[2]);
-  printf("last vertex: %f, %f, %f\n", last.vertex[0], last.vertex[1],
-         last.vertex[2]);
+  Vertex *v = malloc(sizeof(Vertex) * attrib.num_faces);
+  *numVertices = attrib.num_faces;
+  int r = 0;
+  int count = 0;
+  for (uint32_t i = 0; i < attrib.num_face_num_verts; i++) {
+    for (uint32_t j = 0; j < attrib.face_num_verts[r]; j++) {
+      uint32_t faceIdx = (i * 3) + j;
+      tinyobj_vertex_index_t f = attrib.faces[faceIdx];
+      memcpy(&v[count].vertex, &verts[f.v_idx], sizeof(vec3));
+      memcpy(&v[count].texture, &texCoords[f.vt_idx], sizeof(vec2));
+      count++;
+    }
+    r++;
+  }
+  *vertices = v;
 }
 
 void createModelBuffer() {
@@ -1406,7 +1409,7 @@ void initVulkan() {
   createCommandBuffers();
   createSyncObjects();
   createVertexBuffer();
-  loadModel();
+  loadModel("assets/viking_room.obj", &modelVertices, &modelVerticesNum);
   createModelBuffer();
   createIndexBuffer();
 }
