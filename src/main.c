@@ -1171,7 +1171,7 @@ void recordCommandBuffer(VkCommandBuffer commandBuffer, uint32_t imageIndex) {
   vkCmdBindDescriptorSets(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS,
                           pipelineLayout, 0, 1, &descriptorSets[currentFrame],
                           0, NULL);
-  vkCmdDraw(commandBuffer, modelVerticesNum, 1, 0, 0);
+  vkCmdDraw(commandBuffer, modelVerticesNum, 2, 0, 0);
   vkCmdEndRenderPass(commandBuffer);
   VkResult endBufferResult = vkEndCommandBuffer(commandBuffer);
   if (endBufferResult != VK_SUCCESS) {
@@ -1235,12 +1235,12 @@ void updateUniformBuffer(uint32_t currentImage) {
       .view = GLM_MAT4_IDENTITY_INIT,
       .proj = GLM_MAT4_IDENTITY_INIT,
   };
-  glm_rotate(ubo.model, time / 50 * glm_rad(90.0f), (vec3){0.0f, 0.0f, 1.0f});
-  vec3 eye = {1.5f, 1.5f, 1.5f};
+  glm_rotate(ubo.model, time * glm_rad(90.0f), (vec3){0.0f, 1.0f, 0.0f});
+  vec3 eye = {0.0f, 10.0f, 0.0f};
   vec3 center = {0.0f, 0.0f, 0.0f};
-  vec3 up = {0.0f, 0.0f, 1.0f};
+  vec3 up = {0.0f, 0.0f, -1.0f};
   glm_lookat(eye, center, up, ubo.view);
-  glm_perspective(glm_rad(45.0f),
+  glm_perspective(glm_rad(100.0f),
                   swapchainExtent.width / (float)swapchainExtent.height, 0.1f,
                   10.0f, ubo.proj);
   ubo.proj[1][1] *= -1;
@@ -1347,6 +1347,10 @@ void loadModel(const char *filename, Vertex **vertices, int *numVertices) {
   }
 
   Vertex *v = malloc(sizeof(Vertex) * attrib.num_faces);
+  if (v == NULL) {
+    printf("malloc failed\n");
+    exit(1);
+  }
   *numVertices = attrib.num_faces;
   int r = 0;
   int count = 0;
@@ -1409,7 +1413,7 @@ void initVulkan() {
   createCommandBuffers();
   createSyncObjects();
   createVertexBuffer();
-  loadModel("assets/viking_room.obj", &modelVertices, &modelVerticesNum);
+  loadModel("assets/branch_t.obj", &modelVertices, &modelVerticesNum);
   createModelBuffer();
   createIndexBuffer();
 }
