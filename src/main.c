@@ -1,3 +1,4 @@
+#include <math.h>
 #define GLM_FORCE_RADIANS
 #define GLM_FORCE_DEPTH_ZERO_TO_ONE
 #define TINYOBJ_LOADER_C_IMPLEMENTATION
@@ -46,6 +47,8 @@ VkPhysicalDevice physicalDevice;
 VkDevice device;
 
 VkQueue queue;
+
+uint32_t mipLevels;
 
 VkImage textureImage;
 
@@ -269,7 +272,8 @@ void endSingleTimeCommands(VkCommandBuffer commandBuffer) {
 }
 
 void transitionImageLayout(VkImage image, VkFormat format,
-                           VkImageLayout oldLayout, VkImageLayout newLayout) {
+                           VkImageLayout oldLayout, VkImageLayout newLayout,
+                           uint32_t mipLevels) {
   VkCommandBuffer cmdBuff = beginSingleTimeCommands();
   VkImageMemoryBarrier barrier = {
       .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
@@ -281,7 +285,7 @@ void transitionImageLayout(VkImage image, VkFormat format,
       .subresourceRange = {
           .aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
           .baseMipLevel = 0,
-          .levelCount = 1,
+          .levelCount = mipLevels,
           .baseArrayLayer = 0,
           .layerCount = 1,
       }};
@@ -506,20 +510,20 @@ void createDescriptorSets() {
   }
 }
 
-void createImage(uint32_t width, uint32_t height, VkFormat format,
-                 VkImageTiling tiling, VkImageUsageFlags usage,
+void createImage(uint32_t width, uint32_t height, uint32_t mipLevels,
+                 VkFormat format, VkImageTiling tiling, VkImageUsageFlags usage,
                  VkMemoryPropertyFlags props, VkImage *image,
                  VkDeviceMemory *imageMemory) {
   VkImageCreateInfo imageInfo = {
       .sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO,
       .imageType = VK_IMAGE_TYPE_2D,
+      .mipLevels = mipLevels,
       .extent =
           {
               .width = width,
               .height = height,
               .depth = 1,
           },
-      .mipLevels = 1,
       .arrayLayers = 1,
       .format = format,
       .tiling = tiling,
@@ -569,10 +573,94 @@ void copyBufferToImage(VkBuffer buffer, VkImage image, uint32_t width,
   endSingleTimeCommands(cmdBuff);
 }
 
+void generateMipmaps(VkImage image, uint32_t texWidth, uint32_t texHeight,
+                     uint32_t mipLevels) {
+  printf("generateMipmaps\n");
+  // Skip checking physical device format capabilities
+  VkCommandBuffer commandBuffer = beginSingleTimeCommands();
+  VkImageMemoryBarrier barrier = {
+      .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
+      .image = image,
+      .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+      .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+      .subresourceRange =
+          {
+              .aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
+              .baseArrayLayer = 0,
+              .layerCount = 1,
+              .levelCount = 1,
+          },
+  };
+  uint32_t mipWidth = texWidth;
+  uint32_t mipHeight = texHeight;
+  for (uint32_t i = 1; i < mipLevels; i++) {
+    printf("mipHeight %d, mipWidth: %d\n", mipHeight, mipWidth);
+    barrier.subresourceRange.baseMipLevel = i - 1;
+    barrier.oldLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+    barrier.newLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
+    barrier.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+    barrier.dstAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
+    vkCmdPipelineBarrier(commandBuffer, VK_PIPELINE_STAGE_TRANSFER_BIT,
+                         VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0, NULL, 0, NULL, 1,
+                         &barrier);
+    VkImageBlit blit = {
+        .srcOffsets[0] = {0, 0, 0},
+        .srcOffsets[1] = {mipWidth, mipHeight, 1},
+        .srcSubresource =
+            {
+                .aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
+                .mipLevel = i - 1,
+                .baseArrayLayer = 0,
+                .layerCount = 1,
+            },
+        .dstOffsets[0] = {0, 0, 0},
+        .dstOffsets[1] =
+            {
+                mipWidth > 1 ? mipWidth / 2 : 1,
+                mipHeight > 1 ? mipHeight / 2 : 1,
+                1,
+            },
+        .dstSubresource =
+            {
+                .aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
+                .mipLevel = i,
+                .baseArrayLayer = 0,
+                .layerCount = 1,
+            },
+    };
+    vkCmdBlitImage(commandBuffer, image, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+                   image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &blit,
+                   VK_FILTER_LINEAR);
+    barrier.oldLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
+    barrier.newLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+    barrier.srcAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
+    barrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
+    vkCmdPipelineBarrier(commandBuffer, VK_PIPELINE_STAGE_TRANSFER_BIT,
+                         VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT, 0, 0, NULL, 0,
+                         NULL, 1, &barrier);
+    if (mipWidth > 1) {
+      mipWidth /= 2;
+    }
+    if (mipHeight > 1) {
+      mipHeight /= 2;
+    }
+  }
+  barrier.subresourceRange.baseMipLevel = mipLevels - 1;
+  barrier.oldLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+  barrier.newLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+  barrier.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+  barrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
+  vkCmdPipelineBarrier(commandBuffer, VK_PIPELINE_STAGE_TRANSFER_BIT,
+                       VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT, 0, 0, NULL, 0,
+                       NULL, 1, &barrier);
+  endSingleTimeCommands(commandBuffer);
+}
+
 void createTextureImage() {
   int texWidth, texHeight, texChannels;
   stbi_uc *pixels = stbi_load("assets/viking_room.png", &texWidth, &texHeight,
                               &texChannels, STBI_rgb_alpha);
+  mipLevels = ((uint32_t)floor(log2(max(texWidth, texHeight)))) + 1;
   VkDeviceSize dSize = texWidth * texHeight * 4;
   VkBuffer stage;
   VkDeviceMemory stageMem;
@@ -586,41 +674,21 @@ void createTextureImage() {
   vkUnmapMemory(device, stageMem);
   free(pixels);
 
-  createImage(texWidth, texHeight, VK_FORMAT_R8G8B8A8_SRGB,
+  createImage(texWidth, texHeight, mipLevels, VK_FORMAT_R8G8B8A8_SRGB,
               VK_IMAGE_TILING_OPTIMAL,
-              VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT,
+              VK_IMAGE_USAGE_TRANSFER_SRC_BIT |
+                  VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT,
               VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT |
                   VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
               &textureImage, &textureMem);
   transitionImageLayout(textureImage, VK_FORMAT_R8G8B8A8_SRGB,
                         VK_IMAGE_LAYOUT_UNDEFINED,
-                        VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
+                        VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, mipLevels);
   copyBufferToImage(stage, textureImage, texWidth, texHeight);
-  transitionImageLayout(textureImage, VK_FORMAT_R8G8B8A8_SRGB,
-                        VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
-                        VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
-}
-
-void createTextureImageView() {
-  VkImageViewCreateInfo viewInfo = {
-      .sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO,
-      .image = textureImage,
-      .viewType = VK_IMAGE_VIEW_TYPE_2D,
-      .format = VK_FORMAT_R8G8B8A8_SRGB,
-      .subresourceRange =
-          {
-              .aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
-              .baseMipLevel = 0,
-              .levelCount = 1,
-              .baseArrayLayer = 0,
-              .layerCount = 1,
-          },
-  };
-  if (vkCreateImageView(device, &viewInfo, NULL, &textureImageView) !=
-      VK_SUCCESS) {
-    printf("error creating texture image view\n");
-    exit(1);
-  }
+  generateMipmaps(textureImage, texWidth, texHeight, mipLevels);
+  // transitionImageLayout(textureImage, VK_FORMAT_R8G8B8A8_SRGB,
+  //                       VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+  //                       VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, mipLevels);
 }
 
 void createTextureSampler() {
@@ -640,6 +708,9 @@ void createTextureSampler() {
       .compareEnable = VK_FALSE,
       .compareOp = VK_COMPARE_OP_ALWAYS,
       .mipmapMode = VK_SAMPLER_MIPMAP_MODE_LINEAR,
+      .minLod = (float)(mipLevels / 2),
+      .maxLod = (float)mipLevels,
+      .mipLodBias = 0.0f,
   };
   if (vkCreateSampler(device, &samplerInfo, NULL, &textureSampler) !=
       VK_SUCCESS) {
@@ -777,7 +848,8 @@ void createSwapchain() {
 }
 
 VkImageView createImageView(VkImage image, VkFormat format,
-                            VkImageAspectFlags aspectFlags) {
+                            VkImageAspectFlags aspectFlags,
+                            uint32_t mipLevels) {
   VkImageViewCreateInfo info = {
       .sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO,
       .image = image,
@@ -787,7 +859,7 @@ VkImageView createImageView(VkImage image, VkFormat format,
           {
               .aspectMask = aspectFlags,
               .baseMipLevel = 0,
-              .levelCount = 1,
+              .levelCount = mipLevels,
               .baseArrayLayer = 0,
               .layerCount = 1,
           },
@@ -800,6 +872,11 @@ VkImageView createImageView(VkImage image, VkFormat format,
   return imageView;
 }
 
+void createTextureImageView() {
+  textureImageView = createImageView(textureImage, VK_FORMAT_R8G8B8A8_SRGB,
+                                     VK_IMAGE_ASPECT_COLOR_BIT, mipLevels);
+}
+
 void createImageViews() {
   printf("creating image views\n");
   swapchainImageViews = malloc(sizeof(VkImageView) * imageCount);
@@ -809,7 +886,7 @@ void createImageViews() {
   }
   for (uint32_t i = 0; i < imageCount; i++) {
     swapchainImageViews[i] = createImageView(
-        swapchainImages[i], swapchainImageFormat, VK_IMAGE_ASPECT_COLOR_BIT);
+        swapchainImages[i], swapchainImageFormat, VK_IMAGE_ASPECT_COLOR_BIT, 1);
   }
 }
 
@@ -1209,7 +1286,7 @@ void updateUniformBuffer(uint32_t currentImage) {
       .view = GLM_MAT4_IDENTITY_INIT,
       .proj = GLM_MAT4_IDENTITY_INIT,
   };
-  glm_rotate(ubo.model, time * glm_rad(45.0f), (vec3){0.0f, 0.0f, 1.0f});
+  glm_rotate(ubo.model, time / 50 * glm_rad(45.0f), (vec3){0.0f, 0.0f, 1.0f});
   vec3 eye = {2.0f, 2.0f, 2.0f};
   vec3 center = {0.0f, 0.0f, 0.0f};
   vec3 up = {0.0f, 0.0f, 1.0f};
@@ -1269,11 +1346,11 @@ void drawFrame() {
 void createDepthResources() {
   VkFormat depthFormat = VK_FORMAT_D32_SFLOAT;
   createImage(
-      swapchainExtent.width, swapchainExtent.height, depthFormat,
+      swapchainExtent.width, swapchainExtent.height, 1, depthFormat,
       VK_IMAGE_TILING_OPTIMAL, VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT,
       VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, &depthImage, &depthImageMemory);
   depthImageView =
-      createImageView(depthImage, depthFormat, VK_IMAGE_ASPECT_DEPTH_BIT);
+      createImageView(depthImage, depthFormat, VK_IMAGE_ASPECT_DEPTH_BIT, 1);
 }
 
 void initWindow() {
