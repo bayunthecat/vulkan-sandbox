@@ -7,6 +7,7 @@
 #include "cglm/types.h"
 #include "cglm/util.h"
 #include "file_utils.h"
+#include "instance.h"
 #include "stb_image.h"
 #include "tinyobj_loader_c.h"
 #include "vulkan/vulkan_core.h"
@@ -669,35 +670,7 @@ void createVertexBuffer() {
   vkFreeMemory(device, stagingMemory, NULL);
 }
 
-void createInstance() {
-  printf("creating vulkan instance\n");
-  uint32_t extCount = 0;
-  const char **extensions = glfwGetRequiredInstanceExtensions(&extCount);
-  printf("glfw required extensions:\n");
-  uint32_t valCount = 1;
-  for (uint32_t i = 0; i < extCount; i++) {
-    printf("%s\n", extensions[i]);
-  }
-  const char **validation = (const char *[]){"VK_LAYER_KHRONOS_validation"};
-  VkApplicationInfo appInfo = {.sType = VK_STRUCTURE_TYPE_APPLICATION_INFO,
-                               .apiVersion = VK_API_VERSION_1_3,
-                               .engineVersion = VK_MAKE_VERSION(1, 0, 0),
-                               .applicationVersion = VK_MAKE_VERSION(1, 0, 0)};
-  VkInstanceCreateInfo info = {.sType = VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO,
-                               .pApplicationInfo = &appInfo,
-                               .enabledExtensionCount = extCount,
-                               .ppEnabledExtensionNames = extensions,
-                               .enabledLayerCount = valCount,
-                               .ppEnabledLayerNames = validation};
-  VkResult result = vkCreateInstance(&info, NULL, &vkInstance);
-  if (result != VK_SUCCESS) {
-    fprintf(stderr, "failed to create vulkan instance\n");
-    exit(1);
-  }
-}
-
 void pickPhysicalDevice() {
-  printf("selecting physical device\n");
   uint32_t deviceCount;
   vkEnumeratePhysicalDevices(vkInstance, &deviceCount, NULL);
   if (deviceCount < 1) {
@@ -708,6 +681,7 @@ void pickPhysicalDevice() {
   vkEnumeratePhysicalDevices(vkInstance, &deviceCount, devices);
   // skipped queue introspection logic for simplicity
   physicalDevice = devices[0];
+  printf("selected physical device: %p\n", physicalDevice);
 }
 
 void createLogicalDevice() {
@@ -1171,7 +1145,7 @@ void recordCommandBuffer(VkCommandBuffer commandBuffer, uint32_t imageIndex) {
   vkCmdBindDescriptorSets(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS,
                           pipelineLayout, 0, 1, &descriptorSets[currentFrame],
                           0, NULL);
-  vkCmdDraw(commandBuffer, modelVerticesNum, 2, 0, 0);
+  vkCmdDraw(commandBuffer, modelVerticesNum, 1, 0, 0);
   vkCmdEndRenderPass(commandBuffer);
   VkResult endBufferResult = vkEndCommandBuffer(commandBuffer);
   if (endBufferResult != VK_SUCCESS) {
@@ -1235,12 +1209,12 @@ void updateUniformBuffer(uint32_t currentImage) {
       .view = GLM_MAT4_IDENTITY_INIT,
       .proj = GLM_MAT4_IDENTITY_INIT,
   };
-  glm_rotate(ubo.model, time * glm_rad(90.0f), (vec3){0.0f, 1.0f, 0.0f});
-  vec3 eye = {0.0f, 10.0f, 0.0f};
+  glm_rotate(ubo.model, time * glm_rad(45.0f), (vec3){0.0f, 0.0f, 1.0f});
+  vec3 eye = {2.0f, 2.0f, 2.0f};
   vec3 center = {0.0f, 0.0f, 0.0f};
-  vec3 up = {0.0f, 0.0f, -1.0f};
+  vec3 up = {0.0f, 0.0f, 1.0f};
   glm_lookat(eye, center, up, ubo.view);
-  glm_perspective(glm_rad(100.0f),
+  glm_perspective(glm_rad(45.0f),
                   swapchainExtent.width / (float)swapchainExtent.height, 0.1f,
                   10.0f, ubo.proj);
   ubo.proj[1][1] *= -1;
@@ -1391,7 +1365,7 @@ void createModelBuffer() {
 
 void initVulkan() {
   initWindow();
-  createInstance();
+  createInstance(&vkInstance);
   createSurface();
   pickPhysicalDevice();
   createLogicalDevice();
@@ -1413,7 +1387,7 @@ void initVulkan() {
   createCommandBuffers();
   createSyncObjects();
   createVertexBuffer();
-  loadModel("assets/branch_t.obj", &modelVertices, &modelVerticesNum);
+  loadModel("assets/viking_room.obj", &modelVertices, &modelVerticesNum);
   createModelBuffer();
   createIndexBuffer();
 }
